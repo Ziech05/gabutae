@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="id">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Personal Finance Tracker (Static)</title>
+        <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            padding: 20px; 
+            background-color: #f4f7f6;
+            color: #333;
+        }
+        .container { 
+            max-width: 800px; 
+            margin: 20px auto; 
+            background: #fff; 
+            padding: 30px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); 
+        }
+        h1, h2 { color: #007bff; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+        input[type="text"], input[type="number"], input[type="date"], select, button {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        button { 
+            cursor: pointer; 
+            background-color: #007bff; 
+            color: white; 
+            border: none;
+            transition: background-color 0.3s;
+        }
+        button:hover { background-color: #0056b3; }
+        #transactionForm { 
+            display: grid; 
+            grid-template-columns: 1fr 2fr 1fr 1fr 100px; 
+            gap: 10px; 
+            align-items: center; 
+            margin-bottom: 20px;
+        }
+        .summary { 
+            display: flex; 
+            justify-content: space-around; 
+            margin-bottom: 20px; 
+            padding: 15px; 
+            background-color: #e9ecef; 
+            border-radius: 6px;
+        }
+        .summary div { text-align: center; }
+        .summary p { margin: 5px 0; font-size: 1.2em; font-weight: bold; }
+        .balance-positive { color: #28a745; }
+        .balance-negative { color: #dc3545; }
+        .transaction-list { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .transaction-list th, .transaction-list td { 
+            padding: 12px 8px; 
+            border-bottom: 1px solid #ddd; 
+            text-align: left;
+        }
+        .transaction-list th { background-color: #f8f9fa; }
+        .income-row { color: #28a745; }
+        .expense-row { color: #dc3545; }
+        .delete-btn { background-color: #dc3545; padding: 5px 10px; font-size: 0.8em; }
+        .delete-btn:hover { background-color: #c82333; }
+        .controls { margin-top: 20px; }
+        .controls button { margin-right: 10px; padding: 10px 15px; }
+    </style>
+    </head>
+    <body>
+
+        <div class="container">
+            <h1>💸 Pencatat Keuangan Pribadi (Offline)</h1>
+            <p>Data tersimpan di perangkat Anda (LocalStorage). Gunakan fitur
+                Ekspor untuk mencadangkan data Anda!</p>
+
+            <div class="summary">
+                <div>
+                    Total Pemasukan: <p id="totalIncome"
+                        class="balance-positive">Rp 0</p>
+                </div>
+                <div>
+                    Total Pengeluaran: <p id="totalExpense"
+                        class="balance-negative">Rp 0</p>
+                </div>
+                <div>
+                    Saldo Saat Ini: <p id="currentBalance">Rp 0</p>
+                </div>
+            </div>
+
+            <h2>Tambah Transaksi</h2>
+            <form id="transactionForm">
+                <select id="jenis" required>
+                    <option value>Jenis</option>
+                    <option value="pemasukan">Pemasukan</option>
+                    <option value="pengeluaran">Pengeluaran</option>
+                </select>
+                <input type="text" id="deskripsi"
+                    placeholder="Deskripsi Transaksi" required>
+                <input type="number" id="jumlah" placeholder="Jumlah (Rp)"
+                    required min="1">
+                <input type="date" id="tanggal" required>
+                <button type="submit">Tambah</button>
+            </form>
+
+            <hr>
+
+            <h2>Riwayat Transaksi</h2>
+            <table class="transaction-list">
+                <thead>
+                    <tr>
+                        <th>Tanggal</th>
+                        <th>Deskripsi</th>
+                        <th>Jenis</th>
+                        <th>Jumlah</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody id="transactionList">
+                </tbody>
+            </table>
+
+            <hr>
+
+            <h2>Manajemen Data</h2>
+            <div class="controls">
+                <button id="exportBtn">⬇️ Ekspor Data (.json)</button>
+                <input type="file" id="importFile" accept=".json"
+                    style="display: none;">
+                <button id="importBtn">⬆️ Impor Data (.json)</button>
+            </div>
+        </div>
+
+        <script>
+    const STORAGE_KEY = 'keuanganApp_data';
+
+    // Helper untuk format mata uang Rupiah
+    const formatRupiah = (amount) => {
+        return new Intl.NumberFormat('id-ID', {
+            style: 'currency',
+            currency: 'IDR',
+            minimumFractionDigits: 0
+        }).format(amount);
+    };
+
+    // --- CRUD dan Penyimpanan Data ---
+
+    function getTransactions() {
+        const data = localStorage.getItem(STORAGE_KEY);
+        return data ? JSON.parse(data) : [];
+    }
+
+    function saveTransactions(transactions) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
+        renderAll(); // Refresh tampilan dan ringkasan
+    }
+
+    function deleteTransaction(id) {
+        if (!confirm('Anda yakin ingin menghapus transaksi ini?')) return;
+        
+        let transactions = getTransactions();
+        // Filter array untuk menghapus transaksi berdasarkan ID
+        transactions = transactions.filter(t => t.id !== id);
+        saveTransactions(transactions);
+    }
+
+    // --- Rendering (Menampilkan Data) ---
+
+    function renderSummary(transactions) {
+        let totalIncome = 0;
+        let totalExpense = 0;
+
+        transactions.forEach(t => {
+            if (t.jenis === 'pemasukan') {
+                totalIncome += t.jumlah;
+            } else if (t.jenis === 'pengeluaran') {
+                totalExpense += t.jumlah;
+            }
+        });
+
+        const currentBalance = totalIncome - totalExpense;
+
+        document.getElementById('totalIncome').textContent = formatRupiah(totalIncome);
+        document.getElementById('totalExpense').textContent = formatRupiah(totalExpense);
+        
+        const balanceEl = document.getElementById('currentBalance');
+        balanceEl.textContent = formatRupiah(currentBalance);
+        
+        // Atur warna saldo
+        balanceEl.className = currentBalance >= 0 ? 'balance-positive' : 'balance-negative';
+    }
+
+    function renderTransactions() {
+        const listBody = document.getElementById('transactionList');
+        const transactions = getTransactions();
+        listBody.innerHTML = ''; // Kosongkan daftar
+
+        if (transactions.length === 0) {
+            listBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Belum ada transaksi.</td></tr>';
+            return;
+        }
+
+        // Urutkan berdasarkan tanggal terbaru
+        transactions.sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal));
+
+        transactions.forEach(t => {
+            const row = listBody.insertRow();
+            row.className = t.jenis === 'pemasukan' ? 'income-row' : 'expense-row';
+
+            // Sel Tanggal
+            row.insertCell().textContent = t.tanggal;
+            // Sel Deskripsi
+            row.insertCell().textContent = t.deskripsi;
+            // Sel Jenis
+            row.insertCell().textContent = t.jenis.charAt(0).toUpperCase() + t.jenis.slice(1); // Kapitalisasi
+            // Sel Jumlah
+            row.insertCell().textContent = formatRupiah(t.jumlah);
+            
+            // Sel Aksi (Delete)
+            const actionCell = row.insertCell();
+            const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = 'Hapus';
+            deleteBtn.className = 'delete-btn';
+            // Mengikat event delete ke ID transaksi
+            deleteBtn.onclick = () => deleteTransaction(t.id);
+            actionCell.appendChild(deleteBtn);
+        });
+        
+        renderSummary(transactions); // Panggil ringkasan setiap kali daftar di-render
+    }
+
+    function renderAll() {
+        const transactions = getTransactions();
+        renderSummary(transactions);
+        renderTransactions();
+    }
+
+
+    // --- Event Listeners ---
+
+    // 1. Tambah Transaksi
+    document.getElementById('transactionForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const jumlahInput = document.getElementById('jumlah');
+        const newTransaction = {
+            // Menggunakan timestamp milidetik sebagai ID unik
+            id: Date.now(), 
+            jenis: document.getElementById('jenis').value,
+            deskripsi: document.getElementById('deskripsi').value.trim(),
+            jumlah: parseInt(jumlahInput.value),
+            tanggal: document.getElementById('tanggal').value
+        };
+
+        const transactions = getTransactions();
+        transactions.push(newTransaction);
+        saveTransactions(transactions);
+
+        // Reset form, kecuali tanggal
+        e.target.reset();
+        document.getElementById('tanggal').value = newTransaction.tanggal; // Pertahankan tanggal terakhir
+    });
+
+    // 2. Ekspor Data
+    document.getElementById('exportBtn').addEventListener('click', function() {
+        const transactions = getTransactions();
+        if (transactions.length === 0) {
+            alert('Tidak ada data untuk diekspor!');
+            return;
+        }
+
+        const dataStr = JSON.stringify(transactions, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+        const exportFileDefaultName = 'keuangan_export_' + new Date().toISOString().slice(0, 10) + '.json';
+
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', exportFileDefaultName);
+        document.body.appendChild(linkElement);
+        linkElement.click(); 
+        document.body.removeChild(linkElement); 
+        alert('Data berhasil diekspor sebagai ' + exportFileDefaultName);
+    });
+
+    // 3. Impor Data
+    const importFile = document.getElementById('importFile');
+    document.getElementById('importBtn').addEventListener('click', () => importFile.click());
+
+    importFile.addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const importedData = JSON.parse(e.target.result);
+
+                // Validasi data impor
+                if (!Array.isArray(importedData) || importedData.some(t => !t.id || !t.jenis || typeof t.jumlah !== 'number' || !t.tanggal)) {
+                    throw new Error("Struktur data JSON tidak valid atau korup.");
+                }
+                
+                if (confirm('Anda yakin ingin MENIMPA data keuangan saat ini dengan data dari file impor? Tindakan ini tidak dapat dibatalkan.')) {
+                    saveTransactions(importedData);
+                    alert('Data berhasil diimpor dan diperbarui!');
+                }
+            } catch (error) {
+                alert('Gagal mengimpor file. Pastikan file berformat JSON yang valid: ' + error.message);
+                console.error(error);
+            }
+            // Reset input file agar dapat mengimpor file yang sama lagi
+            event.target.value = null; 
+        };
+
+        reader.readAsText(file);
+    });
+
+    // --- Inisialisasi Aplikasi ---
+    document.addEventListener('DOMContentLoaded', function() {
+        // Set tanggal input ke tanggal hari ini secara default
+        document.getElementById('tanggal').valueAsDate = new Date();
+        renderAll();
+    });
+</script>
+
+    </body>
+</html>
