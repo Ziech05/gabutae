@@ -1,2 +1,0 @@
-# gabutae
-uji coba doang
